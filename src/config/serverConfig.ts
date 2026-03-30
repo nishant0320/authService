@@ -17,5 +17,11 @@ export const SMTP_FROM_NAME = process.env.SMTP_FROM_NAME || "AuthService";
 export const SMTP_FROM_EMAIL =
   process.env.SMTP_FROM_EMAIL || "noreply@authservice.com";
 
-
 export const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+
+export const JWT_ACCESS_SECRET =
+  process.env.JWT_ACCESS_SECRET || "dev-access-secret";
+export const JWT_REFRESH_SECRET =
+  process.env.JWT_REFRESH_SECRET || "dev-refresh-secret";
+export const JWT_ACCESS_EXPIRY = process.env.JWT_ACCESS_EXPIRY || "15m";
+export const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || "7d";

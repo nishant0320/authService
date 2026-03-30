@@ -12,3 +12,14 @@ const redis = new Redis(REDIS_URL, {
   enableReadyCheck: true,
   lazyConnect: false,
 });
+
+redis.on("connect", () => logger.info("Redis connected"));
+redis.on("error", (err) => logger.error("Redis error", { error: err.message }));
+redis.on("close", () => logger.warn("Redis connection closed"));
+
+export async function disconnectRedis(): Promise<void> {
+  await redis.quit();
+  logger.info("Redis disconnected gracefully.");
+}
+
+export default redis;

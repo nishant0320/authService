@@ -11,6 +11,7 @@ import {
   JWT_BLACKLIST_PREFIX,
   REFRESH_TOKEN_PREFIX,
 } from "../common/constants";
+import { UnauthorizedError } from "../errors/error";
 
 export function generateTokenPair(payload: JwtPayload): TokenPair {
   const accessToken = jwt.sign(payload, JWT_ACCESS_SECRET, {
@@ -54,4 +55,17 @@ export async function blacklistToken(token: string): Promise<void> {
 
 export async function removeRefreshToken(userId: string): Promise<void> {
   await redis.del(`${REFRESH_TOKEN_PREFIX}${userId}`);
+}
+
+export async function verifyAccessToken(token: string): Promise<JwtPayload> {
+  try {
+    const isBlacklisted = await redis.get(`${JWT_BLACKLIST_PREFIX}${token}`);
+    if (isBlacklisted) throw new UnauthorizedError("Token has been revoked");
+
+    const decoded = jwt.verify(token, JWT_ACCESS_SECRET) as JwtPayload;
+    return decoded;
+  } catch (error) {
+    if (error instanceof UnauthorizedError) throw error;
+    throw new UnauthorizedError("Invalid or expired access token");
+  }
 }

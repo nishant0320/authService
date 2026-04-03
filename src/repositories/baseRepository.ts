@@ -7,21 +7,13 @@ import {
   NotFoundError,
 } from "../utils/errors/error";
 
-function handlePrismaError(
-  error: any,
-  modelName: string,
-  operation: string,
-): never {
+function handlePrismaError(error: any, modelName: string, operation: string): never {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     if (error.code === "P2025") {
-      throw new NotFoundError(
-        `${modelName} required for ${operation} not found.`,
-      );
+      throw new NotFoundError(`${modelName} required for ${operation} not found.`);
     }
     if (error.code === "P2002") {
-      const field = error.meta?.target
-        ? (error.meta.target as string[]).join(", ")
-        : "";
+      const field = error.meta?.target ? (error.meta.target as string[]).join(", ") : "";
 
       throw new ConflictError(
         `Conflict: A record with this unique field ${field} already exists.`,
@@ -49,9 +41,7 @@ export default class BaseRepository<T = any> {
     this.model = (prisma as any)[modelName];
 
     if (!this.model || typeof this.model.findUnique !== "function") {
-      throw new NotFoundError(
-        `${modelName} not found or is invalid in Prisma Client.`,
-      );
+      throw new NotFoundError(`${modelName} not found or is invalid in Prisma Client.`);
     }
   }
   async create(data: any, options: any = {}): Promise<T> {
@@ -69,9 +59,7 @@ export default class BaseRepository<T = any> {
         ...options,
       });
       if (!record) {
-        throw new NotFoundError(
-          `${this.modelName} with ID ${userId} not found`,
-        );
+        throw new NotFoundError(`${this.modelName} with ID ${userId} not found`);
       }
       return record;
     } catch (error) {

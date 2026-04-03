@@ -1,6 +1,7 @@
 import transporter, { EMAIL_FROM } from "../../config/emailConfig";
 import logger from "../../config/loggerConfig";
 import { EmailOptions } from "../../types";
+import { renderTemplate, template } from "../format/mails";
 
 export async function sendEmail(options: EmailOptions): Promise<boolean> {
   try {
@@ -21,29 +22,72 @@ export async function sendEmail(options: EmailOptions): Promise<boolean> {
   }
 }
 
-export async function sendWelcomeEmail(
+export async function sendWelcomeEmail(to: string, name: string): Promise<boolean> {
+  return sendEmail({
+    to,
+    subject: template.welcome.subject,
+    html: renderTemplate(template.welcome.html, { name }),
+  });
+}
+export async function sendOtpEmail(
   to: string,
   name: string,
+  otp: string | number,
+  expiry: string | number,
 ): Promise<boolean> {
   return sendEmail({
     to,
-    subject: "Welcome to Our Service",
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #2563eb;">Welcome, ${name}!</h2>
-        
-        <p>Thanks for signing up.</p>
-        
-        <p>Your account has been successfully created. You can now securely log in and start using the service.</p>
-        
-        <p>If you did not create this account, please contact support immediately.</p>
+    subject: template.otp.subject,
+    html: renderTemplate(template.otp.html, { name, otp, expiry }),
+  });
+}
+export async function sendPasswordChangedEmail(
+  to: string,
+  name: string,
+  changedAt: string | number,
+): Promise<boolean> {
+  return sendEmail({
+    to,
+    subject: template.passwordChanged.subject,
+    html: renderTemplate(template.passwordChanged.html, { name, changedAt }),
+  });
+}
 
-        <hr style="border: none; border-top: 1px solid #e5e7eb;" />
-        
-        <p style="color: #6b7280; font-size: 0.875rem;">
-          This is an automated message. Please do not reply.
-        </p>
-      </div>
-    `,
+export async function sendPasswordlessLoginEmail(
+  to: string,
+  name: string,
+  expiry: string | number,
+  loginUrl: string,
+): Promise<boolean> {
+  return sendEmail({
+    to,
+    subject: template.passwordlessLogin.subject,
+    html: renderTemplate(template.passwordlessLogin.html, {
+      name,
+      loginUrl,
+      expiry,
+    }),
+  });
+}
+export async function sendVerificationEmail(
+  to: string,
+  name: string,
+  verifyUrl: string,
+): Promise<boolean> {
+  return sendEmail({
+    to,
+    subject: template.emailVerification.subject,
+    html: renderTemplate(template.emailVerification.html, { name, verifyUrl }),
+  });
+}
+export async function sendAccountLockedEmail(
+  to: string,
+  name: string,
+  lockedUntil: string | number,
+): Promise<boolean> {
+  return sendEmail({
+    to,
+    subject: template.accountLocked.subject,
+    html: renderTemplate(template.accountLocked.html, { name, lockedUntil }),
   });
 }

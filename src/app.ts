@@ -1,31 +1,28 @@
-import cookieParser from "cookie-parser";
-import express from "express";
-import helmet from "helmet";
+// // import cookieParser from "cookie-parser";
+// // import express from "express";
+// // import helmet from "helmet";
 import { STATUS_CODES } from "./utils/common/constants";
 import apiRouter from "./routes/apiRoutes";
 import { sendError } from "./utils/common/response";
-
-const app = express();
-
-app.use(helmet());
-
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
-app.use(cookieParser());
+import fastifyApp from "./config/serverConfig";
+const app = fastifyApp;
 
 app.get("/health", (_req, res) => {
-  res.status(STATUS_CODES.OK).json({
+  res.status(STATUS_CODES.OK).send({
     success: true,
-    message: "hospital-mgmt-API is running",
-    timestamp: new Date().toISOString(),
+    message: "API is healthy and is running",
+    timestamp: new Date().toLocaleString(),
     uptime: process.uptime(),
   });
 });
 
-app.use("/api", apiRouter);
+app.register(apiRouter, { prefix: "/api" });
 
-app.use((_req, res) => {
-  sendError(res, "Route not found", STATUS_CODES.NOT_FOUND);
+// app.use((_req, res) => {
+//   sendError(res, "Route not found", STATUS_CODES.NOT_FOUND);
+// });
+app.setErrorHandler((err, req, res) => {
+  sendError(res, "Route not found", STATUS_CODES.NOT_FOUND, err);
 });
 
 export default app;

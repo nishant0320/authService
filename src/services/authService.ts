@@ -1,6 +1,6 @@
 import AuditLogRepository from "../repositories/auditLogRepository";
 import UserRepository from "../repositories/userRepository";
-import { JwtPayload, TokenPair } from "../types";
+import { JwtPayload, RegisterBody, TokenPair } from "../types";
 import { ConflictError, UnauthorizedError } from "../utils/errors/error";
 import { sendWelcomeEmail } from "../utils/helpers/email";
 import {
@@ -15,17 +15,13 @@ import bcrypt from "bcrypt";
 import { verifyTotpToken } from "../utils/helpers/totp";
 import logger from "../config/loggerConfig";
 
+
+
 const userRepo = new UserRepository();
 const auditLogRepo = new AuditLogRepository();
 
 export default class AuthService {
-  async register(data: {
-    name: string;
-    email: string;
-    password: string;
-    phone?: string;
-    gender: string;
-  }): Promise<{ user: any; tokens: TokenPair }> {
+  async register(data: RegisterBody): Promise<{ user: any; tokens: TokenPair }> {
     const existing = await userRepo.findByEmail(data.email);
     if (existing) {
       throw new ConflictError("A user with this email already exists.");
@@ -58,12 +54,7 @@ export default class AuthService {
       userId: user.id,
     });
 
-    const {
-      password: _,
-      refreshToken: __,
-      totpSecret: ___,
-      ...safeUser
-    } = user;
+    const { password: _, refreshToken: __, totpSecret: ___, ...safeUser } = user;
 
     return { user: safeUser, tokens };
   }
@@ -106,12 +97,7 @@ export default class AuthService {
     await userRepo.updateRefreshToken(user.id, tokens.refreshToken);
     await userRepo.updateLastLogin(user.id);
 
-    const {
-      password: _,
-      refreshToken: __,
-      totpSecret: ___,
-      ...safeUser
-    } = user;
+    const { password: _, refreshToken: __, totpSecret: ___, ...safeUser } = user;
 
     return { user: safeUser, tokens };
   }
@@ -128,9 +114,7 @@ export default class AuthService {
 
     const storedToken = await getStoredRefreshToken(decoded.id);
     if (!storedToken || storedToken !== refreshToken) {
-      throw new UnauthorizedError(
-        "Refresh token is invalid or has been revoked.",
-      );
+      throw new UnauthorizedError("Refresh token is invalid or has been revoked.");
     }
 
     const user = await userRepo.findById(decoded.id);

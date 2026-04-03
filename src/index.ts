@@ -1,26 +1,30 @@
 import app from "./app";
-import { PORT, NODE_ENV } from "./config/serverConfig";
-import { disconnectRedis } from "./config/redisConfig";
+import { PORT, NODE_ENV } from "./config/envConfig";
+import redis, { disconnectRedis } from "./config/redisConfig";
 import logger from "./config/loggerConfig";
 
-const server = app.listen(PORT, () => {
+await app.listen({ port: PORT }, async (err, add) => {
+  err && logger.error(err.message);
   logger.info(`AuthService started`);
+  await redis.connect();
+  logger.info(`   Redis      : ${"Ram installed"}`);
   logger.info(`   Environment : ${NODE_ENV}`);
   logger.info(`   Port        : ${PORT}`);
-  logger.info(`   Health      : http://localhost:${PORT}/health`);
-  logger.info(`   API Base    : http://localhost:${PORT}/api/v1`);
+  logger.info(`   Address     : ${add}`);
+  logger.info(`   Health      : ${add}/health`);
+  logger.info(`   API Base    : ${add}/api/v1`);
 });
 
 async function gracefulShutdown(signal: string) {
   logger.info(`\n Received ${signal}. Shutting down gracefully…`);
 
-  server.close(async () => {
+  await app.close(async () => {
     logger.info("HTTP server closed.");
 
     try {
       await disconnectRedis();
     } catch (err) {
-      logger.error("Error disconnecting Redis", { error: err });
+      logger.error("Error dismounting RAM", { error: err });
     }
 
     logger.info("All connections closed. Goodbye!");

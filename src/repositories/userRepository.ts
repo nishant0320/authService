@@ -10,10 +10,7 @@ export default class UserRepository extends BaseRepository<User> {
     return this.findOne({ email });
   }
 
-  async updateRefreshToken(
-    userId: string,
-    refreshToken: string | null,
-  ): Promise<User> {
+  async updateRefreshToken(userId: string, refreshToken: string | null): Promise<User> {
     return this.update(userId, { refreshToken });
   }
 

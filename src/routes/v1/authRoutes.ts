@@ -1,18 +1,13 @@
-import { Router } from "express";
-import {
-  login,
-  logout,
-  refreshToken,
-  register,
-} from "../../controllers/authController";
+// import { Router } from "express";
+import { login, logout, refreshToken, register } from "../../controllers/authController";
 import { authenticate } from "../../middlewares/authMiddleware";
 
-const authRouter = Router();
+const authRouter = (app: any) => {
+  app.register(register, { prefix: "/register" });
+  app.register(login, { prefix: "/login" });
+  app.register(refreshToken, { prefix: "/refresh-token" });
 
-authRouter.post("/register", register);
-authRouter.post("/login", login);
-authRouter.post("/refresh-token", refreshToken);
-
-authRouter.post("/logout", authenticate, logout);
+  app.register(authenticate, logout, { prefix: "/logout" });
+};
 
 export default authRouter;

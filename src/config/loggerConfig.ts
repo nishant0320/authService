@@ -1,5 +1,5 @@
 import winston from "winston";
-import { LOG_LEVEL, NODE_ENV } from "./serverConfig";
+import { LOG_LEVEL, NODE_ENV } from "./envConfig";
 import DailyRotateFile from "winston-daily-rotate-file";
 
 const isDev = NODE_ENV === "development";

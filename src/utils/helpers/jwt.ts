@@ -4,19 +4,24 @@ import {
   JWT_ACCESS_SECRET,
   JWT_REFRESH_EXPIRY,
   JWT_REFRESH_SECRET,
-} from "../../config/serverConfig";
+} from "../../config/envConfig";
 import { JwtPayload, TokenPair } from "../../types";
 import jwt, { Secret } from "jsonwebtoken";
 import {
   JWT_BLACKLIST_PREFIX,
   REFRESH_TOKEN_PREFIX,
+  ACCESS_TOKEN_PREFIX,
 } from "../common/constants";
 import { UnauthorizedError } from "../errors/error";
 
 export function generateTokenPair(payload: JwtPayload): TokenPair {
-  const accessToken = jwt.sign(payload, JWT_ACCESS_SECRET, {
-    expiresIn: JWT_ACCESS_EXPIRY as Secret,
-  } as jwt.SignOptions);
+  const accessToken = jwt.sign(
+    payload,
+    JWT_ACCESS_SECRET as Secret,
+    {
+      expiresIn: JWT_ACCESS_EXPIRY,
+    } as jwt.SignOptions,
+  );
 
   const refreshToken = jwt.sign(
     payload,
@@ -34,16 +39,42 @@ export async function storeRefreshToken(
   refreshToken: string,
   ttlSeconds: number = 7 * 24 * 60 * 60,
 ): Promise<void> {
+  await redis.setex(`${REFRESH_TOKEN_PREFIX}${userId}`, ttlSeconds, refreshToken);
+}
+export async function storeToken(
+  userId: string,
+  token: string,
+  ttlSeconds: number = 7 * 24 * 60 * 60,
+  { mode }: { mode: "access" | "refresh" },
+): Promise<void> {
   await redis.setex(
-    `${REFRESH_TOKEN_PREFIX}${userId}`,
+    `${mode === "access" ? ACCESS_TOKEN_PREFIX : REFRESH_TOKEN_PREFIX}${userId}`,
     ttlSeconds,
-    refreshToken,
+    token,
   );
 }
 
 export async function blacklistToken(token: string): Promise<void> {
   try {
-    const decoded = jwt.decode(token) as jwt.JwtPayload | null;
+    const decoded = jwt.verify(token, JWT_ACCESS_SECRET) as jwt.JwtPayload | null;
+    if (!decoded?.exp) return;
+
+    const ttl = decoded.exp - Math.floor(Date.now() / 1000);
+    if (ttl > 0) {
+      await redis.setex(`${JWT_BLACKLIST_PREFIX}${token}`, ttl, "1");
+    }
+  } catch {}
+}
+
+export async function blacklistTokens(
+  token: string,
+  { mode }: { mode: "access" | "refresh" },
+): Promise<void> {
+  try {
+    const decoded = jwt.verify(
+      token,
+      mode === "access" ? JWT_ACCESS_SECRET : JWT_REFRESH_SECRET,
+    ) as jwt.JwtPayload | null;
     if (!decoded?.exp) return;
 
     const ttl = decoded.exp - Math.floor(Date.now() / 1000);
@@ -55,6 +86,9 @@ export async function blacklistToken(token: string): Promise<void> {
 
 export async function removeRefreshToken(userId: string): Promise<void> {
   await redis.del(`${REFRESH_TOKEN_PREFIX}${userId}`);
+}
+export async function removeAccesssToken(userId: string): Promise<void> {
+  await redis.del(`${ACCESS_TOKEN_PREFIX}${userId}`);
 }
 
 export async function verifyAccessToken(token: string): Promise<JwtPayload> {
@@ -78,8 +112,6 @@ export function verifyRefreshToken(token: string): JwtPayload {
   }
 }
 
-export async function getStoredRefreshToken(
-  userId: string,
-): Promise<string | null> {
+export async function getStoredRefreshToken(userId: string): Promise<string | null> {
   return redis.get(`${REFRESH_TOKEN_PREFIX}${userId}`);
 }

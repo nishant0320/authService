@@ -6,7 +6,7 @@ import {
   SMTP_PASSWORD,
   SMTP_PORT,
   SMTP_USER,
-} from "./serverConfig";
+} from "./envConfig";
 import logger from "./loggerConfig";
 
 const transporter = nodemailer.createTransport({

@@ -1,9 +1,12 @@
-import { NextFunction, Request, Response } from "express";
+import { FastifyReply, FastifyRequest } from "fastify";
 
-export default function asyncHandler(
-  fn: (req: Request, res: Response, next: NextFunction) => Promise<any>,
-) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
+type AsyncHandler = (req: FastifyRequest | any, reply: FastifyReply) => Promise<any>;
+
+const asyncHandler =
+  (fn: AsyncHandler) => async (req: FastifyRequest | any, reply: FastifyReply) => {
+    return Promise.resolve(fn(req, reply)).catch((err) => {
+      throw err;
+    });
   };
-}
+
+export default asyncHandler;

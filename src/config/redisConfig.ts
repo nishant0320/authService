@@ -1,5 +1,5 @@
 import Redis from "ioredis";
-import { REDIS_URL } from "./serverConfig";
+import { REDIS_URL } from "./envConfig";
 import logger from "./loggerConfig";
 
 const redis = new Redis(REDIS_URL, {
@@ -10,7 +10,7 @@ const redis = new Redis(REDIS_URL, {
     return delay;
   },
   enableReadyCheck: true,
-  lazyConnect: false,
+  lazyConnect: true,
 });
 
 redis.on("connect", () => logger.info("Redis connected"));

@@ -1,7 +1,11 @@
 import AuditLogRepository from "../repositories/auditLogRepository";
 import UserRepository from "../repositories/userRepository";
 import { JwtPayload, TokenPair } from "../types";
-import { ConflictError, UnauthorizedError } from "../utils/errors/error";
+import {
+  ConflictError,
+  UnauthorizedError,
+  ValidationError,
+} from "../utils/errors/error";
 import { sendWelcomeEmail } from "../utils/helpers/email";
 import {
   blacklistToken,
@@ -12,7 +16,7 @@ import {
   verifyRefreshToken,
 } from "../utils/helpers/jwt";
 import bcrypt from "bcrypt";
-import { verifyTotpToken } from "../utils/helpers/totp";
+import { generateTotpSecret, verifyTotpToken } from "../utils/helpers/totp";
 import logger from "../config/loggerConfig";
 
 const userRepo = new UserRepository();
@@ -90,7 +94,10 @@ export default class AuthService {
           requireTotp: true,
         };
       }
-      if (!user.totpSecret || !verifyTotpToken(totpToken, user.totpSecret)) {
+      if (
+        !user.totpSecret ||
+        !(await verifyTotpToken(totpToken, user.totpSecret))
+      ) {
         throw new UnauthorizedError("Invalid TOTP token.");
       }
     }
@@ -105,6 +112,12 @@ export default class AuthService {
     await storeRefreshToken(user.id, tokens.refreshToken);
     await userRepo.updateRefreshToken(user.id, tokens.refreshToken);
     await userRepo.updateLastLogin(user.id);
+    await auditLogRepo.logAction({
+      action: "LOGIN",
+      entity: "User",
+      entityId: user.id,
+      userId: user.id,
+    });
 
     const {
       password: _,
@@ -120,6 +133,12 @@ export default class AuthService {
     await blacklistToken(accessToken);
     await removeRefreshToken(userId);
     await userRepo.updateRefreshToken(userId, null);
+    await auditLogRepo.logAction({
+      action: "LOGOUT",
+      entity: "User",
+      entityId: userId,
+      userId,
+    });
     logger.info(`User ${userId} logged out.`);
   }
 
@@ -148,4 +167,31 @@ export default class AuthService {
 
     return tokens;
   }
+
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+    accessToken: string,
+  ): Promise<void> {
+    const user = await userRepo.findById(userId);
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) throw new ValidationError("Current password is incorrect");
+
+    await userRepo.update(userId, { password: newPassword });
+
+    await blacklistToken(accessToken);
+    await removeRefreshToken(userId);
+    await userRepo.updateRefreshToken(userId, null);
+
+    await auditLogRepo.logAction({
+      action: "CHANGE_PASSWORD",
+      entity: "User",
+      entityId: userId,
+      userId,
+    });
+  }
+
+  
 }

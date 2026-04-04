@@ -82,13 +82,63 @@ export const googleCallback = asyncHandler(
   },
 );
 
+export const githubLogin = asyncHandler(
+  async (req: FastifyRequest, res: FastifyReply) => {
+    const state = authService.generateOAuthState();
+    const authUrl = authService.getGithubAuthUrl(state);
+
+    res.setCookie("oauth_state", state, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 5 * 60 * 1000,
+    });
+
+    return authUrl;
+  },
+);
+
+export const githubCallback = asyncHandler(
+  async (req: GoogleCallbackRequest, res: FastifyReply) => {
+    const { code, state, error } = req.query;
+
+    if (error) {
+      throw new UnauthorizedError("GitHub OAuth was denied.", { error });
+    }
+
+    if (!code || !state) {
+      throw new UnauthorizedError("Missing GitHub OAuth callback parameters.");
+    }
+
+    const cookieState = req.cookies?.oauth_state;
+    if (!cookieState || cookieState !== state) {
+      throw new UnauthorizedError("Invalid OAuth state.");
+    }
+
+    res.clearCookie("oauth_state");
+
+    const result = await authService.loginWithGithubCode(code);
+    res.setCookie("refreshToken", result.tokens.refreshToken, cookieOption("refresh"));
+
+    return sendSuccess(
+      res,
+      {
+        user: result.user,
+        accessToken: result.tokens.accessToken,
+      },
+      "GitHub login successful",
+      STATUS_CODES.OK,
+    );
+  },
+);
+
 export const passless = asyncHandler(
   async (req: FastifyRequest<{ Body: { email: string } }>, res: FastifyReply) => {
-    let { email, name, token, role } = await authService.passless(req.body.email);
+    let { email, name, token } = await authService.passless(req.body.email);
     let link = buildUrl(req, {
       prefix: "/api/v1/auth",
       path: "/magic/verify",
-      query: { token, role },
+      query: { token },
     });
     await sendPasswordlessLoginEmail(email, name ?? "User", 5, link);
     sendSuccess(res, link, "Passwordless login link successfully send", 200);
@@ -96,12 +146,12 @@ export const passless = asyncHandler(
 );
 export const testPassless = asyncHandler(
   async (req: FastifyRequest, res: FastifyReply) => {
-    let { email, name, token, role } = await authService.testPassless();
+    let { email, name, token } = await authService.testPassless();
 
     let link = buildUrl(req, {
       prefix: "/api/v1/auth",
       path: "/test/magic/verify",
-      query: { token, role },
+      query: { token },
     });
     await sendPasswordlessLoginEmail(email, name ?? "User", 5, link);
     sendSuccess(res, link, "Test Passwordless login link successfully send", 200);
@@ -112,15 +162,24 @@ export const passlessVerify = asyncHandler(
     req: FastifyRequest<{
       Querystring: {
         token: string;
-        role: string;
       };
     }>,
     res: FastifyReply,
   ) => {
-    let { token, role } = req.query;
-    let response = await authService.passlessVerify(token, role);
+    let { token } = req.query;
+    let response = await authService.passlessVerify(token);
 
-    sendSuccess(res, response, "Welcome back", 200);
+    res.setCookie("refreshToken", response.refreshToken, cookieOption("refresh"));
+
+    sendSuccess(
+      res,
+      {
+        user: response.user,
+        accessToken: response.accessToken,
+      },
+      "Welcome back",
+      200,
+    );
   },
 );
 export const testPasslessVerify = asyncHandler(
@@ -128,15 +187,24 @@ export const testPasslessVerify = asyncHandler(
     req: FastifyRequest<{
       Querystring: {
         token: string;
-        role: string;
       };
     }>,
     res: FastifyReply,
   ) => {
-    let { token, role } = req.query;
-    let response = await authService.testPasslessVerify(token, role);
+    let { token } = req.query;
+    let response = await authService.testPasslessVerify(token);
 
-    sendSuccess(res, response, "Test Welcome back", 200);
+    res.setCookie("refreshToken", response.refreshToken, cookieOption("refresh"));
+
+    sendSuccess(
+      res,
+      {
+        user: response.user,
+        accessToken: response.accessToken,
+      },
+      "Test Welcome back",
+      200,
+    );
   },
 );
 

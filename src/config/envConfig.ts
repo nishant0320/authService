@@ -30,9 +30,16 @@ export const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || "7d";
 export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 export const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 export const GOOGLE_REDIRECT_URI =
-  process.env.GOOGLE_REDIRECT_URI || "http://localhost:3000/api/v1/auth/google/callback";
+  process.env.GOOGLE_REDIRECT_URI ||
+  "http://localhost:3000/api/v1/auth/oauth/google/callback";
 export const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 export const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 export const USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo";
+
+export const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || "";
+export const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || "";
+export const GITHUB_REDIRECT_URI =
+  process.env.GITHUB_REDIRECT_URI ||
+  "http://localhost:3000/api/v1/auth/oauth/github/callback";
 
 export const TOTP_ISSUER = process.env.TOTP_ISSUER || "Auth Service";

@@ -32,6 +32,9 @@ import {
   GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET,
   GOOGLE_REDIRECT_URI,
+  GITHUB_CLIENT_ID,
+  GITHUB_CLIENT_SECRET,
+  GITHUB_REDIRECT_URI,
 } from "../config/envConfig";
 import crypto from "node:crypto";
 
@@ -147,6 +150,130 @@ export default class AuthService {
     return { user: safeUser, tokens };
   }
 
+  private assertGithubConfig() {
+    if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET || !GITHUB_REDIRECT_URI) {
+      throw new InternalServerError(
+        "GitHub OAuth is not configured. Set GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, and GITHUB_REDIRECT_URI.",
+      );
+    }
+  }
+
+  getGithubAuthUrl(state: string) {
+    this.assertGithubConfig();
+    const githubAuthUrl = new URL("https://github.com/login/oauth/authorize");
+    githubAuthUrl.searchParams.set("client_id", GITHUB_CLIENT_ID);
+    githubAuthUrl.searchParams.set("redirect_uri", GITHUB_REDIRECT_URI);
+    githubAuthUrl.searchParams.set("scope", "user:email");
+    githubAuthUrl.searchParams.set("state", state);
+    return githubAuthUrl.toString();
+  }
+
+  async loginWithGithubCode(code: string): Promise<{ user: any; tokens: TokenPair }> {
+    this.assertGithubConfig();
+
+    const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        client_id: GITHUB_CLIENT_ID,
+        client_secret: GITHUB_CLIENT_SECRET,
+        code,
+        redirect_uri: GITHUB_REDIRECT_URI,
+      }),
+    });
+
+    if (!tokenRes.ok) {
+      const tokenErr = await tokenRes.text();
+      throw new UnauthorizedError("GitHub token exchange failed.", { tokenErr });
+    }
+
+    const tokenData = (await tokenRes.json()) as { access_token?: string };
+    if (!tokenData.access_token) {
+      throw new UnauthorizedError("GitHub did not return an access token.");
+    }
+
+    const profileRes = await fetch("https://api.github.com/user", {
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+        Accept: "application/vnd.github.v3+json",
+      },
+    });
+
+    if (!profileRes.ok) {
+      const profileErr = await profileRes.text();
+      throw new UnauthorizedError("Failed to fetch GitHub user profile.", { profileErr });
+    }
+
+    const profile = (await profileRes.json()) as {
+      login?: string;
+      id?: number;
+      email?: string;
+      name?: string;
+      avatar_url?: string;
+    };
+
+    if (!profile.email) {
+      const emailRes = await fetch("https://api.github.com/user/emails", {
+        headers: {
+          Authorization: `Bearer ${tokenData.access_token}`,
+          Accept: "application/vnd.github.v3+json",
+        },
+      });
+
+      if (emailRes.ok) {
+        const emails = (await emailRes.json()) as Array<{
+          email: string;
+          primary: boolean;
+          verified: boolean;
+        }>;
+        const primaryEmail = emails.find((e) => e.primary && e.verified);
+        if (!primaryEmail?.email) {
+          throw new UnauthorizedError("No verified email found in GitHub account.");
+        }
+        profile.email = primaryEmail.email;
+      } else {
+        throw new UnauthorizedError(
+          "GitHub account email is missing and could not be fetched.",
+        );
+      }
+    }
+
+    let user = await userRepo.findByEmail(profile.email);
+
+    if (!user) {
+      const generatedPassword = await hash(crypto.randomUUID());
+      user = await userRepo.create({
+        name: profile.name || profile.login || profile.email.split("@")[0],
+        email: profile.email,
+        password: generatedPassword,
+        role: "USER",
+        avatarUrl: profile.avatar_url,
+      });
+    } else {
+      user = await userRepo.update(user.id, {
+        name: profile.name || user.name,
+        avatarUrl: profile.avatar_url || user.avatarUrl,
+        lastLogin: new Date(),
+      });
+    }
+
+    const payload: JwtPayload = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    };
+    const tokens = generateTokenPair(payload);
+
+    await storeRefreshToken(user.id, tokens.refreshToken);
+    await userRepo.updateRefreshToken(user.id, tokens.refreshToken);
+
+    const { password: _, refreshToken: __, totpSecret: ___, ...safeUser } = user;
+    return { user: safeUser, tokens };
+  }
+
   async register(data: RegisterBody): Promise<{ user: any; tokens: TokenPair }> {
     const existing = await userRepo.findByEmail(data.email);
     if (existing) {
@@ -237,7 +364,7 @@ export default class AuthService {
 
   async passless(
     email: string,
-  ): Promise<{ email: string; name?: string; token: string; role: string }> {
+  ): Promise<{ email: string; name?: string; token: string }> {
     let user = await userRepo.findByEmail(email);
     if (!user) throw new NotFoundError("User not found with this email");
     let accessToken = generateAccessToken({
@@ -245,15 +372,13 @@ export default class AuthService {
       email: user.email,
       role: user.role,
     });
-    let role = await hash(user.role);
-    return { email: user?.email, name: user?.name ?? "user", token: accessToken, role };
+    return { email: user?.email, name: user?.name ?? "user", token: accessToken };
   }
 
   async testPassless(): Promise<{
     email: string;
     name?: string;
     token: string;
-    role: string;
   }> {
     let user = testUser;
     let accessToken = generateAccessToken({
@@ -261,34 +386,65 @@ export default class AuthService {
       email: user.email,
       role: user.role,
     });
-    let role = await hash(user.role);
-    return { email: user?.email, name: user?.name ?? "User", token: accessToken, role };
+    return { email: user?.email, name: user?.name ?? "User", token: accessToken };
   }
 
-  async passlessVerify(token: string, userRole: string): Promise<boolean> {
+  async passlessVerify(token: string) {
     let { id, email, role } = await verifyAccessToken(token);
-    let tamperedRole = await bcrypt.compare(role, userRole);
-    if (!tamperedRole) throw new UnauthorizedError("Url is tampered");
     let user = await userRepo.findByEmail(email);
     if (!user) throw new NotFoundError("User not found with this email");
-    let validRole = bcrypt.compare(user.role, userRole);
-    let verified = user.id === id && user.email === email && validRole;
-    return verified;
+    if (user.id !== id) throw new UnauthorizedError("Token user ID mismatch");
+    if (user.role !== role) throw new UnauthorizedError("Token role mismatch");
+
+    // Generate session tokens
+    const tokens = generateTokenPair({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    await storeRefreshToken(user.id, tokens.refreshToken);
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+      },
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    };
   }
 
-  async testPasslessVerify(token: string, userRole: string): Promise<boolean> {
+  async testPasslessVerify(token: string) {
     let decoded = await verifyAccessToken(token);
 
     if (!decoded) throw new UnauthorizedError("Invalid or expired tokens");
     let { email, id, role } = decoded;
-    console.log(role, userRole);
 
     let user = testUser;
-    let tamperedRole = await bcrypt.compare(role, userRole);
-    if (!tamperedRole) throw new UnauthorizedError("Tampered Role", { tamperedRole });
-    let validRole = bcrypt.compare(user.role, userRole);
-    let verified = user.id === id && user.email === email && validRole;
-    return verified;
+    if (user.id !== id) throw new UnauthorizedError("Token user ID mismatch");
+    if (user.email !== email) throw new UnauthorizedError("Token email mismatch");
+    if (user.role !== role) throw new UnauthorizedError("Token role mismatch");
+
+    // Generate session tokens
+    const tokens = generateTokenPair({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+      },
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    };
   }
 
   async refreshTokens(refreshToken: string): Promise<TokenPair> {

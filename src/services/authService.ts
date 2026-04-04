@@ -1,21 +1,23 @@
 import AuditLogRepository from "../repositories/auditLogRepository";
 import UserRepository from "../repositories/userRepository";
-import { JwtPayload, RegisterBody, TokenPair } from "../types";
-import { ConflictError, UnauthorizedError } from "../utils/errors/error";
-import { sendWelcomeEmail } from "../utils/helpers/email";
+import { JwtPayload, RegisterBody, testUser, TokenPair } from "../types";
+import { ConflictError, NotFoundError, UnauthorizedError } from "../utils/errors/error";
+import { sendEmail, sendWelcomeEmail } from "../utils/helpers/email";
 import {
   blacklistToken,
+  generateAccessToken,
   generateTokenPair,
   getStoredRefreshToken,
   removeRefreshToken,
   storeRefreshToken,
+  verifyAccessToken,
   verifyRefreshToken,
 } from "../utils/helpers/jwt";
 import bcrypt from "bcrypt";
 import { verifyTotpToken } from "../utils/helpers/totp";
 import logger from "../config/loggerConfig";
-
-
+import { hash } from "../utils/helpers/hash";
+import { sendError, sendSuccess } from "../utils/common/response";
 
 const userRepo = new UserRepository();
 const auditLogRepo = new AuditLogRepository();
@@ -109,6 +111,62 @@ export default class AuthService {
     logger.info(`User ${userId} logged out.`);
   }
 
+  async passless(
+    email: string,
+  ): Promise<{ email: string; name?: string; token: string; role: string }> {
+    let user = await userRepo.findByEmail(email);
+    if (!user) throw new NotFoundError("User not found with this email");
+    let accessToken = generateAccessToken({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    });
+    let role = await hash(user.role);
+    return { email: user?.email, name: user?.name ?? "user", token: accessToken, role };
+  }
+
+  async testPassless(): Promise<{
+    email: string;
+    name?: string;
+    token: string;
+    role: string;
+  }> {
+    let user = testUser;
+    let accessToken = generateAccessToken({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    });
+    let role = await hash(user.role);
+    return { email: user?.email, name: user?.name ?? "User", token: accessToken, role };
+  }
+
+  async passlessVerify(token: string, userRole: string): Promise<boolean> {
+    let { id, email, role } = await verifyAccessToken(token);
+    let tamperedRole = await bcrypt.compare(role, userRole);
+    if (!tamperedRole) throw new UnauthorizedError("Url is tampered");
+    let user = await userRepo.findByEmail(email);
+    if (!user) throw new NotFoundError("User not found with this email");
+    let validRole = bcrypt.compare(user.role, userRole);
+    let verified = user.id === id && user.email === email && validRole;
+    return verified;
+  }
+
+  async testPasslessVerify(token: string, userRole: string): Promise<boolean> {
+    let decoded = await verifyAccessToken(token);
+
+    if (!decoded) throw new UnauthorizedError("Invalid or expired tokens");
+    let { email, id, role } = decoded;
+    console.log(role, userRole);
+
+    let user = testUser;
+    let tamperedRole = await bcrypt.compare(role, userRole);
+    if (!tamperedRole) throw new UnauthorizedError("Tampered Role", { tamperedRole });
+    let validRole = bcrypt.compare(user.role, userRole);
+    let verified = user.id === id && user.email === email && validRole;
+    return verified;
+  }
+
   async refreshTokens(refreshToken: string): Promise<TokenPair> {
     const decoded = verifyRefreshToken(refreshToken);
 
@@ -133,3 +191,8 @@ export default class AuthService {
     return tokens;
   }
 }
+
+// let a = new AuthService();
+// let { email, role, token, name } = await a.testPassless();
+// console.table({ email, role, token, name });
+// console.log(await a.testPasslessVerify(token, role));

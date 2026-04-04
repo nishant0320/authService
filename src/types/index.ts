@@ -44,3 +44,6 @@ export interface AuditLogEntry {
   userId: string;
   details?: Record<string, any>;
 }
+
+export type { TestUser } from "./testUser";
+export { testUser } from "./testUser";

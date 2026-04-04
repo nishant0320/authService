@@ -1,13 +1,25 @@
 // import { Router } from "express";
-import { login, logout, refreshToken, register } from "../../controllers/authController";
+import {
+  login,
+  logout,
+  passless,
+  passlessVerify,
+  refreshToken,
+  register,
+  testPassless,
+  testPasslessVerify,
+} from "../../controllers/authController";
 import { authenticate } from "../../middlewares/authMiddleware";
 
 const authRouter = (app: any) => {
-  app.register(register, { prefix: "/register" });
-  app.register(login, { prefix: "/login" });
-  app.register(refreshToken, { prefix: "/refresh-token" });
-
-  app.register(authenticate, logout, { prefix: "/logout" });
+  app.post("/register", register);
+  app.post("/login", login);
+  app.post("/refresh-token", refreshToken);
+  app.post("/magic", passless);
+  app.get("/test/magic", testPassless);
+  app.get("/magic/verify", passlessVerify);
+  app.get("/test/magic/verify", testPasslessVerify);
+  app.post("/logout", { preHandler: authenticate }, logout);
 };
 
 export default authRouter;

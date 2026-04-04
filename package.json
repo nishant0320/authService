@@ -6,7 +6,10 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "format": "bun prettier --write .",
     "dev": "bun --watch src/index.ts",
-    "start": "bun src/index.ts"
+    "start": "bun src/index.ts",
+    "prisma": "bunx prisma generate",
+    "prisma:gen": "bunx prisma generate",
+    "prisma:push": "bunx prisma db push"
   },
   "keywords": [],
   "author": "nishant0320",

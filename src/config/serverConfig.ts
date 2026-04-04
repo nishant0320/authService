@@ -4,7 +4,7 @@ import cookie from "@fastify/cookie";
 
 // let isDev = process.env.NODE_ENV === "dev";
 
-let fastifyApp = fastify({ logger: true });
+let fastifyApp = fastify({ logger: true, exposeHeadRoutes: true });
 fastifyApp.register(cors, { origin: true });
 fastifyApp.register(cookie);
 

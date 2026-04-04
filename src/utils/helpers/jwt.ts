@@ -15,14 +15,14 @@ import {
 import { UnauthorizedError } from "../errors/error";
 
 export function generateTokenPair(payload: JwtPayload): TokenPair {
-  const accessToken = jwt.sign(
-    payload,
-    JWT_ACCESS_SECRET as Secret,
-    {
-      expiresIn: JWT_ACCESS_EXPIRY,
-    } as jwt.SignOptions,
-  );
+  const accessToken = generateRefreshToken(payload);
 
+  const refreshToken = generateAccessToken(payload);
+
+  return { accessToken, refreshToken };
+}
+
+export function generateRefreshToken(payload: JwtPayload): string {
   const refreshToken = jwt.sign(
     payload,
     JWT_REFRESH_SECRET as Secret,
@@ -30,8 +30,17 @@ export function generateTokenPair(payload: JwtPayload): TokenPair {
       expiresIn: JWT_REFRESH_EXPIRY,
     } as jwt.SignOptions,
   );
-
-  return { accessToken, refreshToken };
+  return refreshToken;
+}
+export function generateAccessToken(payload: JwtPayload): string {
+  const accessToken = jwt.sign(
+    payload,
+    JWT_ACCESS_SECRET as Secret,
+    {
+      expiresIn: JWT_ACCESS_EXPIRY,
+    } as jwt.SignOptions,
+  );
+  return accessToken;
 }
 
 export async function storeRefreshToken(
@@ -93,8 +102,8 @@ export async function removeAccesssToken(userId: string): Promise<void> {
 
 export async function verifyAccessToken(token: string): Promise<JwtPayload> {
   try {
-    const isBlacklisted = await redis.get(`${JWT_BLACKLIST_PREFIX}${token}`);
-    if (isBlacklisted) throw new UnauthorizedError("Token has been revoked");
+    // const isBlacklisted = await redis.get(`${JWT_BLACKLIST_PREFIX}${token}`);
+    // if (isBlacklisted) throw new UnauthorizedError("Token has been revoked");
 
     const decoded = jwt.verify(token, JWT_ACCESS_SECRET) as JwtPayload;
     return decoded;

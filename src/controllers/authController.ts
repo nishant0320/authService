@@ -6,8 +6,10 @@ import AuthService from "../services/authService";
 import asyncHandler from "../utils/common/asyncHandler";
 import { sendSuccess } from "../utils/common/response";
 import { STATUS_CODES } from "../utils/common/constants";
-import { LoginBody, RegisterBody } from "../types";
+import { LoginBody, RegisterBody, testUser } from "../types";
 import cookieOption from "../utils/common/cookieOptions";
+import { sendPasswordlessLoginEmail } from "../utils/helpers/email";
+import { buildUrl } from "../utils/helpers/buildUrl";
 
 const authService = new AuthService();
 
@@ -21,17 +23,70 @@ type RefreshTokenRequest = FastifyRequest<{
   Body: { refreshToken: string };
 }>;
 
+export const passless = asyncHandler(
+  async (req: FastifyRequest<{ Body: { email: string } }>, res: FastifyReply) => {
+    let { email, name, token, role } = await authService.passless(req.body.email);
+    let link = buildUrl(req, {
+      prefix: "/api/v1/auth",
+      path: "/magic/verify",
+      query: { token, role },
+    });
+    await sendPasswordlessLoginEmail(email, name ?? "User", 5, link);
+    sendSuccess(res, link, "Passwordless login link successfully send", 200);
+  },
+);
+export const testPassless = asyncHandler(
+  async (req: FastifyRequest, res: FastifyReply) => {
+    let { email, name, token, role } = await authService.testPassless();
+
+    let link = buildUrl(req, {
+      prefix: "/api/v1/auth",
+      path: "/test/magic/verify",
+      query: { token, role },
+    });
+    await sendPasswordlessLoginEmail(email, name ?? "User", 5, link);
+    sendSuccess(res, link, "Test Passwordless login link successfully send", 200);
+  },
+);
+export const passlessVerify = asyncHandler(
+  async (
+    req: FastifyRequest<{
+      Querystring: {
+        token: string;
+        role: string;
+      };
+    }>,
+    res: FastifyReply,
+  ) => {
+    let { token, role } = req.query;
+    let response = await authService.passlessVerify(token, role);
+
+    sendSuccess(res, response, "Welcome back", 200);
+  },
+);
+export const testPasslessVerify = asyncHandler(
+  async (
+    req: FastifyRequest<{
+      Querystring: {
+        token: string;
+        role: string;
+      };
+    }>,
+    res: FastifyReply,
+  ) => {
+    let { token, role } = req.query;
+    let response = await authService.testPasslessVerify(token, role);
+
+    sendSuccess(res, response, "Test Welcome back", 200);
+  },
+);
+
 export const register = asyncHandler(
   async (req: RegisterRequest, res: FastifyReply): Promise<any> => {
     // console.log(req)
     const result = await authService.register(req.body);
 
-    res.setCookie("refreshToken", result.tokens.refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    res.setCookie("refreshToken", result.tokens.refreshToken, cookieOption("refresh"));
 
     sendSuccess(
       res,
@@ -70,7 +125,8 @@ export const login = asyncHandler(async (req: LoginRequest, res: FastifyReply) =
 });
 
 export const logout = asyncHandler(async (req: FastifyRequest, res: FastifyReply) => {
-  const token = req.headers.authorization?.split(" ")[1] || "";
+  const token =
+    req.headers.authorization?.split(" ")[1] || req.cookies.refreshToken || "";
   await authService.logout(req.user!.id, token);
 
   res.clearCookie("refreshToken");

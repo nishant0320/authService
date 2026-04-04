@@ -42,4 +42,12 @@ export const GITHUB_REDIRECT_URI =
   process.env.GITHUB_REDIRECT_URI ||
   "http://localhost:3000/api/v1/auth/oauth/github/callback";
 
+export const WEBAUTHN_RP_ID = process.env.WEBAUTHN_RP_ID || "localhost";
+export const WEBAUTHN_RP_ORIGIN =
+  process.env.WEBAUTHN_RP_ORIGIN || "http://localhost:3000";
+
+export const WHATSAPP_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN || "";
+export const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || "";
+export const WHATSAPP_API_VERSION = process.env.WHATSAPP_API_VERSION || "v22.0";
+
 export const TOTP_ISSUER = process.env.TOTP_ISSUER || "Auth Service";

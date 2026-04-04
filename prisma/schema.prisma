@@ -12,13 +12,20 @@ enum Role {
   ADMIN
 }
 
+enum TwoFactorMethod {
+  NONE
+  TOTP
+  WHATSAPP
+  PASSKEY
+}
+
 model User {
-  id       String  @id @default(uuid())
-  name     String
-  email    String  @unique
-  phone    String?
-  password String  @map("hashed_password")
-  role     Role
+  id        String  @id @default(uuid())
+  name      String
+  email     String  @unique
+  phone     String?
+  password  String  @map("hashed_password")
+  role      Role
   avatarUrl String?
 
   isActive     Boolean  @default(true)
@@ -27,16 +34,37 @@ model User {
 
   totpSecret    String?
   isTotpEnabled Boolean @default(false)
+  isWhatsappEnabled Boolean @default(false)
+  twoFactorMethod   TwoFactorMethod @default(NONE)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   oauthAccounts OAuthAccount[]
+  passkeys      PasskeyCredential[]
   auditLog      AuditLog[]
 
   @@index([email])
   @@index([role])
   @@map("users")
+}
+
+model PasskeyCredential {
+  id           String @id @default(uuid())
+  credentialId String @unique
+  publicKey    String
+  counter      Int    @default(0)
+  transports   String?
+  nickname     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("passkey_credentials")
 }
 
 model OAuthAccount {

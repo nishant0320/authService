@@ -35,13 +35,58 @@ import {
   GITHUB_CLIENT_ID,
   GITHUB_CLIENT_SECRET,
   GITHUB_REDIRECT_URI,
+  WEBAUTHN_RP_ID,
+  WEBAUTHN_RP_ORIGIN,
 } from "../config/envConfig";
+import PasskeyRepository from "../repositories/passkeyRepository";
+import {
+  createTwoFactorSessionId,
+  deleteTwoFactorSession,
+  generateNumericCode,
+  getTwoFactorSession,
+  hashTwoFactorCode,
+  storeTwoFactorSession,
+  verifyTwoFactorCode,
+} from "../utils/helpers/twoFactor";
+import {
+  isWhatsAppConfigured,
+  sendWhatsAppVerificationCode,
+} from "../utils/helpers/whatsapp";
+import {
+  generateAuthenticationOptions,
+  generateRegistrationOptions,
+  verifyAuthenticationResponse,
+  verifyRegistrationResponse,
+} from "@simplewebauthn/server";
 import crypto from "node:crypto";
 
 const userRepo = new UserRepository();
 const auditLogRepo = new AuditLogRepository();
+const passkeyRepo = new PasskeyRepository();
 
 export default class AuthService {
+  private buildSafeUser(user: any) {
+    const { password: _, refreshToken: __, totpSecret: ___, ...safeUser } = user;
+    return safeUser;
+  }
+
+  private async issueTokens(user: any) {
+    const payload: JwtPayload = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    };
+    const tokens = generateTokenPair(payload);
+
+    await storeRefreshToken(user.id, tokens.refreshToken);
+    await userRepo.updateRefreshToken(user.id, tokens.refreshToken);
+
+    return {
+      user: this.buildSafeUser(user),
+      tokens,
+    };
+  }
+
   private assertGoogleConfig() {
     if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REDIRECT_URI) {
       throw new InternalServerError(
@@ -65,6 +110,42 @@ export default class AuthService {
 
   generateOAuthState() {
     return crypto.randomBytes(16).toString("hex");
+  }
+
+  private assertWebAuthnConfig() {
+    if (!WEBAUTHN_RP_ID || !WEBAUTHN_RP_ORIGIN) {
+      throw new InternalServerError(
+        "WebAuthn is not configured. Set WEBAUTHN_RP_ID and WEBAUTHN_RP_ORIGIN.",
+      );
+    }
+  }
+
+  private async createTwoFactorLoginSession(params: {
+    userId: string;
+    method: "TOTP" | "WHATSAPP" | "PASSKEY";
+    purpose: "login" | "enable";
+    codeHash?: string;
+    challenge?: string;
+    payload?: Record<string, any>;
+  }) {
+    const sessionId = createTwoFactorSessionId();
+    await storeTwoFactorSession({
+      sessionId,
+      userId: params.userId,
+      method: params.method,
+      purpose: params.purpose,
+      codeHash: params.codeHash,
+      challenge: params.challenge,
+      payload: params.payload,
+      createdAt: new Date().toISOString(),
+    });
+    return sessionId;
+  }
+
+  private async completePasswordLogin(user: any) {
+    const { user: safeUser, tokens } = await this.issueTokens(user);
+    await userRepo.updateLastLogin(user.id);
+    return { user: safeUser, tokens };
   }
 
   async loginWithGoogleCode(code: string): Promise<{ user: any; tokens: TokenPair }> {
@@ -316,7 +397,20 @@ export default class AuthService {
     email: string,
     password: string,
     totpToken?: string,
-  ): Promise<{ user: any; tokens: TokenPair; requireTotp?: boolean }> {
+  ): Promise<
+    | { user: any; tokens: TokenPair }
+    | { user: { id: string }; tokens: TokenPair; requireTotp: true }
+    | {
+        user: { id: string };
+        tokens: TokenPair;
+        require2fa: {
+          method: "WHATSAPP" | "PASSKEY";
+          sessionId: string;
+          options?: any;
+          destination?: string;
+        };
+      }
+  > {
     const user = await userRepo.findByEmail(email);
     if (!user) throw new UnauthorizedError("Invalid email or password.");
     if (!user.isActive) {
@@ -326,7 +420,10 @@ export default class AuthService {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) throw new UnauthorizedError("Invalid email or password.");
 
-    if (user.isTotpEnabled) {
+    const activeTwoFactor =
+      user.twoFactorMethod || (user.isTotpEnabled ? "TOTP" : "NONE");
+
+    if (activeTwoFactor === "TOTP") {
       if (!totpToken) {
         return {
           user: { id: user.id },
@@ -339,20 +436,401 @@ export default class AuthService {
       }
     }
 
-    const payload: JwtPayload = {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-    };
-    const tokens = generateTokenPair(payload);
+    if (activeTwoFactor === "WHATSAPP") {
+      if (!user.phone) {
+        throw new ValidationError("A phone number is required for WhatsApp 2FA.");
+      }
 
-    await storeRefreshToken(user.id, tokens.refreshToken);
-    await userRepo.updateRefreshToken(user.id, tokens.refreshToken);
-    await userRepo.updateLastLogin(user.id);
+      const code = generateNumericCode();
+      const codeHash = await hashTwoFactorCode(code);
+      const sessionId = await this.createTwoFactorLoginSession({
+        userId: user.id,
+        method: "WHATSAPP",
+        purpose: "login",
+        codeHash,
+      });
 
-    const { password: _, refreshToken: __, totpSecret: ___, ...safeUser } = user;
+      await sendWhatsAppVerificationCode(user.phone, code, user.name);
 
-    return { user: safeUser, tokens };
+      return {
+        user: { id: user.id },
+        tokens: { accessToken: "", refreshToken: "" },
+        require2fa: {
+          method: "WHATSAPP",
+          sessionId,
+          destination: user.phone,
+        },
+      };
+    }
+
+    if (activeTwoFactor === "PASSKEY") {
+      const credentials = await passkeyRepo.findByUserId(user.id);
+      if (!credentials.length) {
+        throw new NotFoundError("No passkey credentials found for this account.");
+      }
+
+      this.assertWebAuthnConfig();
+      const options = await generateAuthenticationOptions({
+        rpID: WEBAUTHN_RP_ID,
+        userVerification: "preferred",
+        allowCredentials: credentials.map((credential) => ({
+          id: credential.credentialId,
+          type: "public-key" as const,
+          transports: credential.transports
+            ? (credential.transports.split(",") as any)
+            : undefined,
+        })),
+      });
+
+      const sessionId = await this.createTwoFactorLoginSession({
+        userId: user.id,
+        method: "PASSKEY",
+        purpose: "login",
+        challenge: options.challenge,
+        payload: { options },
+      });
+
+      return {
+        user: { id: user.id },
+        tokens: { accessToken: "", refreshToken: "" },
+        require2fa: {
+          method: "PASSKEY",
+          sessionId,
+          options,
+        },
+      };
+    }
+
+    return this.completePasswordLogin(user);
+  }
+
+  async enableTotp(
+    userId: string,
+    password: string,
+  ): Promise<{ secret: string; qrCode: string }> {
+    const user = await userRepo.findById(userId);
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) throw new ValidationError("Password is incorrect");
+
+    if (user.isTotpEnabled) throw new ConflictError("TOTP is already enabled");
+
+    const secret = generateTotpSecret();
+    const qrCode = await generateTotpQrCode(user.email, secret);
+
+    await userRepo.update(userId, {
+      totpSecret: secret,
+      isTotpEnabled: false,
+      isWhatsappEnabled: false,
+      twoFactorMethod: "TOTP",
+    });
+
+    return { secret, qrCode };
+  }
+
+  async verifyAndActivateTotp(userId: string, token: string): Promise<void> {
+    const user = await userRepo.findById(userId);
+
+    if (!user.totpSecret) {
+      throw new NotFoundError("No TOTP secret found. Call enable first.");
+    }
+
+    if (user.isTotpEnabled) {
+      throw new ConflictError("TOTP is already active.");
+    }
+
+    const isValid = await verifyTotpToken(token, user.totpSecret);
+    if (!isValid) {
+      throw new ValidationError("Invalid TOTP token. Please try again.");
+    }
+
+    await userRepo.update(userId, {
+      isTotpEnabled: true,
+      isWhatsappEnabled: false,
+      twoFactorMethod: "TOTP",
+    });
+
+    await auditLogRepo.logAction({
+      action: "ENABLE_TOTP",
+      entity: "User",
+      entityId: userId,
+      userId,
+    });
+  }
+
+  async disableTotp(userId: string, password: string): Promise<void> {
+    const user = await userRepo.findById(userId);
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      throw new ValidationError("Password is incorrect.");
+    }
+
+    await userRepo.update(userId, {
+      totpSecret: null,
+      isTotpEnabled: false,
+      twoFactorMethod: user.twoFactorMethod === "TOTP" ? "NONE" : user.twoFactorMethod,
+    });
+
+    await auditLogRepo.logAction({
+      action: "DISABLE_TOTP",
+      entity: "User",
+      entityId: userId,
+      userId,
+    });
+  }
+
+  async enableWhatsappTwoFactor(
+    userId: string,
+    password: string,
+  ): Promise<{ sessionId: string; destination: string }> {
+    const user = await userRepo.findById(userId);
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) throw new ValidationError("Password is incorrect");
+
+    if (!user.phone)
+      throw new ValidationError("Add a phone number before enabling WhatsApp 2FA.");
+    if (!isWhatsAppConfigured()) {
+      throw new InternalServerError(
+        "WhatsApp messaging is not configured. Set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID.",
+      );
+    }
+
+    const code = generateNumericCode();
+    const codeHash = await hashTwoFactorCode(code);
+    const sessionId = await this.createTwoFactorLoginSession({
+      userId,
+      method: "WHATSAPP",
+      purpose: "enable",
+      codeHash,
+    });
+
+    await sendWhatsAppVerificationCode(user.phone, code, user.name);
+    return { sessionId, destination: user.phone };
+  }
+
+  async verifyWhatsappTwoFactor(
+    userId: string,
+    sessionId: string,
+    code: string,
+  ): Promise<void> {
+    const session = await getTwoFactorSession(sessionId);
+    if (!session || session.userId !== userId || session.method !== "WHATSAPP") {
+      throw new UnauthorizedError("Invalid or expired WhatsApp verification session.");
+    }
+
+    if (!session.codeHash || !(await verifyTwoFactorCode(code, session.codeHash))) {
+      throw new UnauthorizedError("Invalid WhatsApp verification code.");
+    }
+
+    await deleteTwoFactorSession(sessionId);
+    await userRepo.update(userId, {
+      isWhatsappEnabled: true,
+      isTotpEnabled: false,
+      twoFactorMethod: "WHATSAPP",
+    });
+
+    await auditLogRepo.logAction({
+      action: "ENABLE_WHATSAPP_2FA",
+      entity: "User",
+      entityId: userId,
+      userId,
+    });
+  }
+
+  async disableWhatsappTwoFactor(userId: string, password: string): Promise<void> {
+    const user = await userRepo.findById(userId);
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) throw new ValidationError("Password is incorrect.");
+
+    await userRepo.update(userId, {
+      isWhatsappEnabled: false,
+      twoFactorMethod:
+        user.twoFactorMethod === "WHATSAPP" ? "NONE" : user.twoFactorMethod,
+    });
+
+    await auditLogRepo.logAction({
+      action: "DISABLE_WHATSAPP_2FA",
+      entity: "User",
+      entityId: userId,
+      userId,
+    });
+  }
+
+  async verifyWhatsappLogin(
+    sessionId: string,
+    code: string,
+  ): Promise<{ user: any; tokens: TokenPair }> {
+    const session = await getTwoFactorSession(sessionId);
+    if (!session || session.method !== "WHATSAPP" || session.purpose !== "login") {
+      throw new UnauthorizedError("Invalid or expired WhatsApp login session.");
+    }
+
+    if (!session.codeHash || !(await verifyTwoFactorCode(code, session.codeHash))) {
+      throw new UnauthorizedError("Invalid WhatsApp verification code.");
+    }
+
+    const user = await userRepo.findById(session.userId);
+    await deleteTwoFactorSession(sessionId);
+    return this.completePasswordLogin(user);
+  }
+
+  async beginPasskeyRegistration(
+    userId: string,
+  ): Promise<{ sessionId: string; options: any }> {
+    this.assertWebAuthnConfig();
+    const user = await userRepo.findById(userId);
+    const existingCredentials = await passkeyRepo.findByUserId(userId);
+
+    const options = await generateRegistrationOptions({
+      rpName: "AuthService",
+      rpID: WEBAUTHN_RP_ID,
+      userID: user.id,
+      userName: user.email,
+      userDisplayName: user.name,
+      attestationType: "none",
+      authenticatorSelection: {
+        residentKey: "preferred",
+        userVerification: "preferred",
+      },
+      excludeCredentials: existingCredentials.map((credential) => ({
+        id: credential.credentialId,
+        type: "public-key",
+        transports: credential.transports
+          ? (credential.transports.split(",") as any)
+          : undefined,
+      })),
+    });
+
+    const sessionId = await this.createTwoFactorLoginSession({
+      userId,
+      method: "PASSKEY",
+      purpose: "enable",
+      challenge: options.challenge,
+      payload: { options },
+    });
+
+    return { sessionId, options };
+  }
+
+  async verifyPasskeyRegistration(
+    userId: string,
+    sessionId: string,
+    response: any,
+  ): Promise<void> {
+    this.assertWebAuthnConfig();
+    const session = await getTwoFactorSession(sessionId);
+    if (!session || session.userId !== userId || session.method !== "PASSKEY") {
+      throw new UnauthorizedError("Invalid or expired passkey registration session.");
+    }
+    if (!session.challenge) {
+      throw new UnauthorizedError("Missing passkey registration challenge.");
+    }
+
+    const verification = await verifyRegistrationResponse({
+      response,
+      expectedChallenge: session.challenge,
+      expectedOrigin: WEBAUTHN_RP_ORIGIN,
+      expectedRPID: WEBAUTHN_RP_ID,
+      requireUserVerification: true,
+    });
+
+    if (!verification.verified || !verification.registrationInfo) {
+      throw new UnauthorizedError("Passkey registration failed.");
+    }
+
+    const { credential } = verification.registrationInfo;
+
+    await passkeyRepo.create({
+      userId,
+      credentialId: credential.id,
+      publicKey: Buffer.from(credential.publicKey).toString("base64url"),
+      counter: credential.counter,
+      transports: response?.response?.transports?.join(",") ?? null,
+    });
+
+    await deleteTwoFactorSession(sessionId);
+    await userRepo.update(userId, {
+      isTotpEnabled: false,
+      isWhatsappEnabled: false,
+      twoFactorMethod: "PASSKEY",
+    });
+
+    await auditLogRepo.logAction({
+      action: "ENABLE_PASSKEY",
+      entity: "User",
+      entityId: userId,
+      userId,
+    });
+  }
+
+  async verifyPasskeyLogin(
+    sessionId: string,
+    response: any,
+  ): Promise<{ user: any; tokens: TokenPair }> {
+    this.assertWebAuthnConfig();
+    const session = await getTwoFactorSession(sessionId);
+    if (!session || session.method !== "PASSKEY" || session.purpose !== "login") {
+      throw new UnauthorizedError("Invalid or expired passkey login session.");
+    }
+    if (!session.challenge) {
+      throw new UnauthorizedError("Missing passkey login challenge.");
+    }
+
+    const credentialId = response?.id;
+    if (!credentialId) {
+      throw new ValidationError("Passkey credential ID is required.");
+    }
+
+    const credential = await passkeyRepo.findByCredentialId(credentialId);
+    if (!credential || credential.userId !== session.userId) {
+      throw new UnauthorizedError("Passkey credential not found for this user.");
+    }
+
+    const verification = await verifyAuthenticationResponse({
+      response,
+      expectedChallenge: session.challenge,
+      expectedOrigin: WEBAUTHN_RP_ORIGIN,
+      expectedRPID: WEBAUTHN_RP_ID,
+      credential: {
+        id: credential.credentialId,
+        publicKey: Buffer.from(credential.publicKey, "base64url"),
+        counter: credential.counter,
+        transports: credential.transports
+          ? (credential.transports.split(",") as any)
+          : undefined,
+      },
+      requireUserVerification: true,
+    });
+
+    if (!verification.verified || !verification.authenticationInfo) {
+      throw new UnauthorizedError("Passkey verification failed.");
+    }
+
+    await passkeyRepo.update(credential.id, {
+      counter: verification.authenticationInfo.newCounter,
+    });
+
+    const user = await userRepo.findById(session.userId);
+    await deleteTwoFactorSession(sessionId);
+    return this.completePasswordLogin(user);
+  }
+
+  async disablePasskey(userId: string): Promise<void> {
+    await passkeyRepo.deleteByUserId(userId);
+    const user = await userRepo.findById(userId);
+    await userRepo.update(userId, {
+      twoFactorMethod: user.twoFactorMethod === "PASSKEY" ? "NONE" : user.twoFactorMethod,
+    });
+
+    await auditLogRepo.logAction({
+      action: "DISABLE_PASSKEY",
+      entity: "User",
+      entityId: userId,
+      userId,
+    });
   }
 
   async logout(userId: string, accessToken: string): Promise<void> {
@@ -490,69 +968,6 @@ export default class AuthService {
 
     await auditLogRepo.logAction({
       action: "CHANGE_PASSWORD",
-      entity: "User",
-      entityId: userId,
-      userId,
-    });
-  }
-
-  async enableTotp(
-    userId: string,
-    password: string,
-  ): Promise<{ secret: string; qrCode: string }> {
-    const user = await userRepo.findById(userId);
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) throw new ValidationError("Password is incorrect");
-
-    if (user.isTotpEnabled) throw new ConflictError("TOTP is already enabled");
-
-    const secret = generateTotpSecret();
-    const qrCode = await generateTotpQrCode(user.email, secret);
-
-    await userRepo.updateTotpSecret(userId, secret, false);
-
-    return { secret, qrCode };
-  }
-
-  async verifyAndActivateTotp(userId: string, token: string): Promise<void> {
-    const user = await userRepo.findById(userId);
-
-    if (!user.totpSecret) {
-      throw new NotFoundError("No TOTP secret found. Call enable first.");
-    }
-
-    if (user.isTotpEnabled) {
-      throw new ConflictError("TOTP is already active.");
-    }
-
-    const isValid = await verifyTotpToken(token, user.totpSecret);
-    if (!isValid) {
-      throw new ValidationError("Invalid TOTP token. Please try again.");
-    }
-
-    await userRepo.updateTotpSecret(userId, user.totpSecret, true);
-
-    await auditLogRepo.logAction({
-      action: "ENABLE_TOTP",
-      entity: "User",
-      entityId: userId,
-      userId,
-    });
-  }
-
-  async disableTotp(userId: string, password: string): Promise<void> {
-    const user = await userRepo.findById(userId);
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      throw new ValidationError("Password is incorrect.");
-    }
-
-    await userRepo.updateTotpSecret(userId, null, false);
-
-    await auditLogRepo.logAction({
-      action: "DISABLE_TOTP",
       entity: "User",
       entityId: userId,
       userId,

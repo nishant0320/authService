@@ -24,6 +24,10 @@ type RefreshTokenRequest = FastifyRequest<{
   Body: { refreshToken: string };
 }>;
 
+type TwoFactorSessionBody = {
+  sessionId: string;
+};
+
 type GoogleCallbackRequest = FastifyRequest<{
   Querystring: {
     code?: string;
@@ -231,11 +235,25 @@ export const login = asyncHandler(async (req: LoginRequest, res: FastifyReply) =
   const { email, password, totpToken } = req.body;
   const result = await authService.login(email, password, totpToken);
 
-  if (result.requireTotp) {
+  if ("requireTotp" in result) {
     sendSuccess(
       res,
       { requireTotp: true, userId: result.user.id },
       "TOTP required",
+      STATUS_CODES.OK,
+    );
+    return;
+  }
+
+  if ("require2fa" in result) {
+    sendSuccess(
+      res,
+      {
+        require2fa: true,
+        userId: result.user.id,
+        ...result.require2fa,
+      },
+      `${result.require2fa.method} verification required`,
       STATUS_CODES.OK,
     );
     return;
@@ -250,6 +268,116 @@ export const login = asyncHandler(async (req: LoginRequest, res: FastifyReply) =
     STATUS_CODES.OK,
   );
 });
+
+export const whatsappEnable = asyncHandler(
+  async (req: FastifyRequest<{ Body: { password: string } }>, res: FastifyReply) => {
+    const result = await authService.enableWhatsappTwoFactor(
+      req.user!.id,
+      req.body.password,
+    );
+
+    sendSuccess(
+      res,
+      result,
+      "WhatsApp verification code sent. Verify to enable WhatsApp 2FA.",
+      STATUS_CODES.OK,
+    );
+  },
+);
+
+export const whatsappEnableVerify = asyncHandler(
+  async (
+    req: FastifyRequest<{ Body: TwoFactorSessionBody & { code: string } }>,
+    res: FastifyReply,
+  ) => {
+    await authService.verifyWhatsappTwoFactor(
+      req.user!.id,
+      req.body.sessionId,
+      req.body.code,
+    );
+    sendSuccess(res, null, "WhatsApp 2FA enabled successfully", STATUS_CODES.OK);
+  },
+);
+
+export const whatsappDisable = asyncHandler(
+  async (req: FastifyRequest<{ Body: { password: string } }>, res: FastifyReply) => {
+    await authService.disableWhatsappTwoFactor(req.user!.id, req.body.password);
+    sendSuccess(res, null, "WhatsApp 2FA disabled successfully", STATUS_CODES.OK);
+  },
+);
+
+export const whatsappLoginVerify = asyncHandler(
+  async (
+    req: FastifyRequest<{ Body: TwoFactorSessionBody & { code: string } }>,
+    res: FastifyReply,
+  ) => {
+    const response = await authService.verifyWhatsappLogin(
+      req.body.sessionId,
+      req.body.code,
+    );
+    res.setCookie("refreshToken", response.tokens.refreshToken, cookieOption("refresh"));
+    sendSuccess(
+      res,
+      {
+        user: response.user,
+        accessToken: response.tokens.accessToken,
+      },
+      "WhatsApp login successful",
+      STATUS_CODES.OK,
+    );
+  },
+);
+
+export const passkeyRegister = asyncHandler(
+  async (req: FastifyRequest, res: FastifyReply) => {
+    const result = await authService.beginPasskeyRegistration(req.user!.id);
+
+    sendSuccess(res, result, "Passkey registration options generated", STATUS_CODES.OK);
+  },
+);
+
+export const passkeyRegisterVerify = asyncHandler(
+  async (
+    req: FastifyRequest<{ Body: TwoFactorSessionBody & { response: any } }>,
+    res: FastifyReply,
+  ) => {
+    await authService.verifyPasskeyRegistration(
+      req.user!.id,
+      req.body.sessionId,
+      req.body.response,
+    );
+    sendSuccess(res, null, "Passkey enabled successfully", STATUS_CODES.OK);
+  },
+);
+
+export const passkeyLoginVerify = asyncHandler(
+  async (
+    req: FastifyRequest<{ Body: TwoFactorSessionBody & { response: any } }>,
+    res: FastifyReply,
+  ) => {
+    const response = await authService.verifyPasskeyLogin(
+      req.body.sessionId,
+      req.body.response,
+    );
+    res.setCookie("refreshToken", response.tokens.refreshToken, cookieOption("refresh"));
+    sendSuccess(
+      res,
+      {
+        user: response.user,
+        accessToken: response.tokens.accessToken,
+      },
+      "Passkey login successful",
+      STATUS_CODES.OK,
+    );
+  },
+);
+
+export const passkeyDisable = asyncHandler(
+  async (req: FastifyRequest, res: FastifyReply) => {
+    await authService.disablePasskey(req.user!.id);
+    sendSuccess(res, null, "Passkey disabled successfully", STATUS_CODES.OK);
+  },
+);
 
 export const logout = asyncHandler(async (req: FastifyRequest, res: FastifyReply) => {
   const token =

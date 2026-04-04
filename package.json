@@ -10,7 +10,7 @@
     "prisma": "bunx prisma generate",
     "prisma:gen": "bunx prisma generate",
     "prisma:push": "bunx prisma db push",
-    "git": "git add . && git commit -m \"kuch toh kiya hu \"&& git push -f origin main"
+    "git": "git add . && git commit -m \"kuch toh kiya hu \"&& git push -f origin nishu"
   },
   "keywords": [],
   "author": "nishant0320",

@@ -11,10 +11,7 @@ export async function verifyTotpToken(token: string, secret: string): Promise<bo
   return result.valid;
 }
 
-export async function generateTotpQrCode(
-  email: string,
-  secret: string,
-): Promise<string> {
+export async function generateTotpQrCode(email: string, secret: string): Promise<string> {
   const otpauth = generateURI({
     issuer: TOTP_ISSUER,
     label: email,

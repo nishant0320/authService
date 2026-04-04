@@ -100,7 +100,6 @@ export default class AuthService {
     }
 
     const profile = (await profileRes.json()) as {
-      
       email?: string;
       name?: string;
       picture?: string;

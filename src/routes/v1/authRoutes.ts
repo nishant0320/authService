@@ -1,5 +1,7 @@
 // import { Router } from "express";
 import {
+  googleCallback,
+  googleLogin,
   login,
   logout,
   passless,
@@ -14,6 +16,8 @@ import { authenticate } from "../../middlewares/authMiddleware";
 const authRouter = (app: any) => {
   app.post("/register", register);
   app.post("/login", login);
+  app.get("/google", googleLogin);
+  app.get("/google/callback", googleCallback);
   app.post("/refresh-token", refreshToken);
   app.post("/magic", passless);
   app.get("/test/magic", testPassless);

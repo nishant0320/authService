@@ -22,3 +22,8 @@ export const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "dev-access-se
 export const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "dev-refresh-secret";
 export const JWT_ACCESS_EXPIRY = process.env.JWT_ACCESS_EXPIRY || "1h";
 export const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || "7d";
+
+export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+export const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+export const GOOGLE_REDIRECT_URI =
+  process.env.GOOGLE_REDIRECT_URI || "http://localhost:3000/api/v1/auth/google/callback";

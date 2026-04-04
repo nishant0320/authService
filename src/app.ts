@@ -2,6 +2,7 @@
 // // import express from "express";
 // // import helmet from "helmet";
 import { STATUS_CODES } from "./utils/common/constants";
+import { NODE_ENV } from "./config/envConfig";
 import apiRouter from "./routes/apiRoutes";
 import { sendError } from "./utils/common/response";
 import fastifyApp from "./config/serverConfig";
@@ -26,11 +27,17 @@ app.get("/date", (req: FastifyRequest, res: FastifyReply) => {
 
 app.register(apiRouter, { prefix: "/api" });
 
-// app.use((_req, res:FastifyReply) => {
-//   sendError(res, "Route not found", STATUS_CODES.NOT_FOUND);
-// });
-app.setErrorHandler((err, req: FastifyRequest, res: FastifyReply) => {
-  sendError(res, "Route not found", STATUS_CODES.NOT_FOUND, err);
+app.setNotFoundHandler((_req, res) => {
+  sendError(res, "Route not found", STATUS_CODES.NOT_FOUND);
+});
+
+app.setErrorHandler((err: any, _req: FastifyRequest, res: FastifyReply) => {
+  const statusCode = err?.statusCode || STATUS_CODES.INTERNAL_SERVER_ERROR;
+  sendError(res, err?.message || "Something went wrong", statusCode, {
+    name: err?.name,
+    details: err?.details || {},
+    ...(NODE_ENV === "development" ? { stack: err?.stack } : {}),
+  });
 });
 
 export default app;

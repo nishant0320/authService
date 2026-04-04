@@ -1,7 +1,12 @@
 import AuditLogRepository from "../repositories/auditLogRepository";
 import UserRepository from "../repositories/userRepository";
 import { JwtPayload, RegisterBody, testUser, TokenPair } from "../types";
-import { ConflictError, NotFoundError, UnauthorizedError } from "../utils/errors/error";
+import {
+  ConflictError,
+  InternalServerError,
+  NotFoundError,
+  UnauthorizedError,
+} from "../utils/errors/error";
 import { sendEmail, sendWelcomeEmail } from "../utils/helpers/email";
 import {
   blacklistToken,
@@ -18,11 +23,126 @@ import { verifyTotpToken } from "../utils/helpers/totp";
 import logger from "../config/loggerConfig";
 import { hash } from "../utils/helpers/hash";
 import { sendError, sendSuccess } from "../utils/common/response";
+import {
+  GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET,
+  GOOGLE_REDIRECT_URI,
+} from "../config/envConfig";
+import crypto from "crypto";
 
 const userRepo = new UserRepository();
 const auditLogRepo = new AuditLogRepository();
 
 export default class AuthService {
+  private assertGoogleConfig() {
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET || !GOOGLE_REDIRECT_URI) {
+      throw new InternalServerError(
+        "Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI.",
+      );
+    }
+  }
+
+  getGoogleAuthUrl(state: string) {
+    this.assertGoogleConfig();
+
+    const googleAuthUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    googleAuthUrl.searchParams.set("client_id", GOOGLE_CLIENT_ID);
+    googleAuthUrl.searchParams.set("redirect_uri", GOOGLE_REDIRECT_URI);
+    googleAuthUrl.searchParams.set("response_type", "code");
+    googleAuthUrl.searchParams.set("scope", "openid email profile");
+    googleAuthUrl.searchParams.set("state", state);
+    googleAuthUrl.searchParams.set("access_type", "offline");
+    googleAuthUrl.searchParams.set("prompt", "consent");
+
+    return googleAuthUrl.toString();
+  }
+
+  generateOAuthState() {
+    return crypto.randomBytes(16).toString("hex");
+  }
+
+  async loginWithGoogleCode(code: string): Promise<{ user: any; tokens: TokenPair }> {
+    this.assertGoogleConfig();
+
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        redirect_uri: GOOGLE_REDIRECT_URI,
+        grant_type: "authorization_code",
+      }),
+    });
+
+    if (!tokenRes.ok) {
+      const tokenErr = await tokenRes.text();
+      throw new UnauthorizedError("Google token exchange failed.", { tokenErr });
+    }
+
+    const tokenData = (await tokenRes.json()) as { access_token?: string };
+    if (!tokenData.access_token) {
+      throw new UnauthorizedError("Google did not return an access token.");
+    }
+
+    const profileRes = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+
+    if (!profileRes.ok) {
+      const profileErr = await profileRes.text();
+      throw new UnauthorizedError("Failed to fetch Google user profile.", { profileErr });
+    }
+
+    const profile = (await profileRes.json()) as {
+      email?: string;
+      name?: string;
+      picture?: string;
+      email_verified?: boolean;
+    };
+
+    if (!profile.email) {
+      throw new UnauthorizedError("Google account email is missing.");
+    }
+
+    if (profile.email_verified === false) {
+      throw new UnauthorizedError("Google email is not verified.");
+    }
+
+    let user = await userRepo.findByEmail(profile.email);
+
+    if (!user) {
+      const generatedPassword = await hash(crypto.randomUUID());
+      user = await userRepo.create({
+        name: profile.name || profile.email.split("@")[0],
+        email: profile.email,
+        password: generatedPassword,
+        role: "USER",
+        avatarUrl: profile.picture,
+      });
+    } else {
+      user = await userRepo.update(user.id, {
+        name: profile.name || user.name,
+        avatarUrl: profile.picture || user.avatarUrl,
+        lastLogin: new Date(),
+      });
+    }
+
+    const payload: JwtPayload = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    };
+    const tokens = generateTokenPair(payload);
+
+    await storeRefreshToken(user.id, tokens.refreshToken);
+    await userRepo.updateRefreshToken(user.id, tokens.refreshToken);
+
+    const { password: _, refreshToken: __, totpSecret: ___, ...safeUser } = user;
+    return { user: safeUser, tokens };
+  }
+
   async register(data: RegisterBody): Promise<{ user: any; tokens: TokenPair }> {
     const existing = await userRepo.findByEmail(data.email);
     if (existing) {

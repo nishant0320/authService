@@ -4,9 +4,10 @@ import { FastifyReply, FastifyRequest } from "fastify";
 
 import AuthService from "../services/authService";
 import asyncHandler from "../utils/common/asyncHandler";
+import { UnauthorizedError } from "../utils/errors/error";
 import { sendSuccess } from "../utils/common/response";
 import { STATUS_CODES } from "../utils/common/constants";
-import { LoginBody, RegisterBody, testUser } from "../types";
+import { LoginBody, RegisterBody } from "../types";
 import cookieOption from "../utils/common/cookieOptions";
 import { sendPasswordlessLoginEmail } from "../utils/helpers/email";
 import { buildUrl } from "../utils/helpers/buildUrl";
@@ -22,6 +23,64 @@ type LoginRequest = FastifyRequest<{
 type RefreshTokenRequest = FastifyRequest<{
   Body: { refreshToken: string };
 }>;
+
+type GoogleCallbackRequest = FastifyRequest<{
+  Querystring: {
+    code?: string;
+    state?: string;
+    error?: string;
+  };
+}>;
+
+export const googleLogin = asyncHandler(
+  async (_req: FastifyRequest, res: FastifyReply) => {
+    const state = authService.generateOAuthState();
+    const authUrl = authService.getGoogleAuthUrl(state);
+
+    res.setCookie("oauth_state", state, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 5 * 60 * 1000,
+    });
+
+    return res.redirect(authUrl);
+  },
+);
+
+export const googleCallback = asyncHandler(
+  async (req: GoogleCallbackRequest, res: FastifyReply) => {
+    const { code, state, error } = req.query;
+
+    if (error) {
+      throw new UnauthorizedError("Google OAuth was denied.", { error });
+    }
+
+    if (!code || !state) {
+      throw new UnauthorizedError("Missing Google OAuth callback parameters.");
+    }
+
+    const cookieState = req.cookies?.oauth_state;
+    if (!cookieState || cookieState !== state) {
+      throw new UnauthorizedError("Invalid OAuth state.");
+    }
+
+    res.clearCookie("oauth_state");
+
+    const result = await authService.loginWithGoogleCode(code);
+    res.setCookie("refreshToken", result.tokens.refreshToken, cookieOption("refresh"));
+
+    return sendSuccess(
+      res,
+      {
+        user: result.user,
+        accessToken: result.tokens.accessToken,
+      },
+      "Google login successful",
+      STATUS_CODES.OK,
+    );
+  },
+);
 
 export const passless = asyncHandler(
   async (req: FastifyRequest<{ Body: { email: string } }>, res: FastifyReply) => {

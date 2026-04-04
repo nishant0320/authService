@@ -1,29 +1,29 @@
 // import { Router } from "express";
 import {
-  googleCallback,
-  googleLogin,
+  changePassword,
+  disableTotp,
+  enableTotp,
   login,
   logout,
   passless,
   passlessVerify,
   refreshToken,
   register,
-  testPassless,
-  testPasslessVerify,
+  verifyTotp,
 } from "../../controllers/authController";
 import { authenticate } from "../../middlewares/authMiddleware";
 
-const authRouter = (app: any) => {
-  app.post("/register", register);
-  app.post("/login", login);
-  app.get("/google", googleLogin);
-  app.get("/google/callback", googleCallback);
-  app.post("/refresh-token", refreshToken);
-  app.post("/magic", passless);
-  app.get("/test/magic", testPassless);
-  app.get("/magic/verify", passlessVerify);
-  app.get("/test/magic/verify", testPasslessVerify);
-  app.post("/logout", { preHandler: authenticate }, logout);
-};
+const authRouter = Router();
+
+authRouter.post("/register", register);
+authRouter.post("/login", login);
+authRouter.post("/refresh-token", refreshToken);
+
+authRouter.post("/logout", authenticate, logout);
+authRouter.post("/change-password", authenticate, changePassword);
+
+authRouter.post("/totp/enable", authenticate, enableTotp);
+authRouter.post("/totp/verify", authenticate, verifyTotp);
+authRouter.post("/totp/disable", authenticate, disableTotp);
 
 export default authRouter;

@@ -1,6 +1,6 @@
 import app from "./app";
 import { PORT, NODE_ENV } from "./config/envConfig";
-import redis, { disconnectRedis } from "./config/redisConfig";
+import { disconnectRedis } from "./config/redisConfig";
 import logger from "./config/loggerConfig";
 
 const startServer = async () => {

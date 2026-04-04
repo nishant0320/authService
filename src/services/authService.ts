@@ -3,6 +3,7 @@ import UserRepository from "../repositories/userRepository";
 import { JwtPayload, TokenPair } from "../types";
 import {
   ConflictError,
+  NotFoundError,
   UnauthorizedError,
   ValidationError,
 } from "../utils/errors/error";
@@ -16,7 +17,11 @@ import {
   verifyRefreshToken,
 } from "../utils/helpers/jwt";
 import bcrypt from "bcrypt";
-import { generateTotpSecret, verifyTotpToken } from "../utils/helpers/totp";
+import {
+  generateTotpQrCode,
+  generateTotpSecret,
+  verifyTotpToken,
+} from "../utils/helpers/totp";
 import logger from "../config/loggerConfig";
 
 const userRepo = new UserRepository();
@@ -193,5 +198,66 @@ export default class AuthService {
     });
   }
 
-  
+  async enableTotp(
+    userId: string,
+    password: string,
+  ): Promise<{ secret: string; qrCode: string }> {
+    const user = await userRepo.findById(userId);
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) throw new ValidationError("Password is incorrect");
+
+    if (user.isTotpEnabled) throw new ConflictError("TOTP is already enabled");
+
+    const secret = generateTotpSecret();
+    const qrCode = await generateTotpQrCode(user.email, secret);
+
+    await userRepo.updateTotpSecret(userId, secret, false);
+
+    return { secret, qrCode };
+  }
+
+  async verifyAndActivateTotp(userId: string, token: string): Promise<void> {
+    const user = await userRepo.findById(userId);
+
+    if (!user.totpSecret) {
+      throw new NotFoundError("No TOTP secret found. Call enable first.");
+    }
+
+    if (user.isTotpEnabled) {
+      throw new ConflictError("TOTP is already active.");
+    }
+
+    const isValid = await verifyTotpToken(token, user.totpSecret);
+    if (!isValid) {
+      throw new ValidationError("Invalid TOTP token. Please try again.");
+    }
+
+    await userRepo.updateTotpSecret(userId, user.totpSecret, true);
+
+    await auditLogRepo.logAction({
+      action: "ENABLE_TOTP",
+      entity: "User",
+      entityId: userId,
+      userId,
+    });
+  }
+
+  async disableTotp(userId: string, password: string): Promise<void> {
+    const user = await userRepo.findById(userId);
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      throw new ValidationError("Password is incorrect.");
+    }
+
+    await userRepo.updateTotpSecret(userId, null, false);
+
+    await auditLogRepo.logAction({
+      action: "DISABLE_TOTP",
+      entity: "User",
+      entityId: userId,
+      userId,
+    });
+  }
 }

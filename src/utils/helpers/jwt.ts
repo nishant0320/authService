@@ -4,7 +4,7 @@ import {
   JWT_ACCESS_SECRET,
   JWT_REFRESH_EXPIRY,
   JWT_REFRESH_SECRET,
-} from "../../config/serverConfig";
+} from "../../config/envKeys";
 import { JwtPayload, TokenPair } from "../../types";
 import jwt, { Secret } from "jsonwebtoken";
 import {

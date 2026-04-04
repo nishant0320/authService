@@ -18,8 +18,12 @@ export const SMTP_FROM_EMAIL = process.env.SMTP_FROM_EMAIL || "noreply@authservi
 
 export const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
 
-export const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "dev-access-secret";
-export const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "dev-refresh-secret";
+export const JWT_ACCESS_SECRET =
+  process.env.JWT_ACCESS_SECRET ||
+  "$2b$10$Tje$2b$10$TjeapdmfrKm754V8aSOi3dclI1IkdIBtYwsh/U/iFaWQ2WQy6WapdmfrKm7BtYwsh/U/iFaWWQy6W";
+export const JWT_REFRESH_SECRET =
+  process.env.JWT_REFRESH_SECRET ||
+  "$$2b$10$TjeapdmfrKm754V8tbFaSOi3dclI1IkdIBtYwsh/U/iFaWQ2WQy6W3dclI1IkdIBtYwsh/U/iFaWQ2WQy6W";
 export const JWT_ACCESS_EXPIRY = process.env.JWT_ACCESS_EXPIRY || "1h";
 export const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || "7d";
 
@@ -27,5 +31,8 @@ export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 export const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 export const GOOGLE_REDIRECT_URI =
   process.env.GOOGLE_REDIRECT_URI || "http://localhost:3000/api/v1/auth/google/callback";
+export const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
+export const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
+export const USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo";
 
 export const TOTP_ISSUER = process.env.TOTP_ISSUER || "Auth Service";

@@ -33,7 +33,7 @@ import {
   GOOGLE_CLIENT_SECRET,
   GOOGLE_REDIRECT_URI,
 } from "../config/envConfig";
-import crypto from "crypto";
+import crypto from "node:crypto";
 
 const userRepo = new UserRepository();
 const auditLogRepo = new AuditLogRepository();
@@ -49,7 +49,6 @@ export default class AuthService {
 
   getGoogleAuthUrl(state: string) {
     this.assertGoogleConfig();
-
     const googleAuthUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     googleAuthUrl.searchParams.set("client_id", GOOGLE_CLIENT_ID);
     googleAuthUrl.searchParams.set("redirect_uri", GOOGLE_REDIRECT_URI);
@@ -58,7 +57,6 @@ export default class AuthService {
     googleAuthUrl.searchParams.set("state", state);
     googleAuthUrl.searchParams.set("access_type", "offline");
     googleAuthUrl.searchParams.set("prompt", "consent");
-
     return googleAuthUrl.toString();
   }
 
@@ -94,6 +92,7 @@ export default class AuthService {
     const profileRes = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
+    console.table(profileRes);
 
     if (!profileRes.ok) {
       const profileErr = await profileRes.text();
@@ -101,6 +100,7 @@ export default class AuthService {
     }
 
     const profile = (await profileRes.json()) as {
+      
       email?: string;
       name?: string;
       picture?: string;
@@ -404,8 +404,3 @@ export default class AuthService {
     });
   }
 }
-
-// let a = new AuthService();
-// let { email, role, token, name } = await a.testPassless();
-// console.table({ email, role, token, name });
-// console.log(await a.testPasslessVerify(token, role));

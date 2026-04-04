@@ -33,7 +33,7 @@ type GoogleCallbackRequest = FastifyRequest<{
 }>;
 
 export const googleLogin = asyncHandler(
-  async (_req: FastifyRequest, res: FastifyReply) => {
+  async (req: FastifyRequest, res: FastifyReply) => {
     const state = authService.generateOAuthState();
     const authUrl = authService.getGoogleAuthUrl(state);
 
@@ -44,7 +44,7 @@ export const googleLogin = asyncHandler(
       maxAge: 5 * 60 * 1000,
     });
 
-    return res.redirect(authUrl);
+    return authUrl;
   },
 );
 

@@ -19,7 +19,6 @@ model User {
   phone    String?
   password String  @map("hashed_password")
   role     Role
-
   avatarUrl String?
 
   isActive     Boolean  @default(true)
@@ -32,11 +31,29 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  auditLog AuditLog[]
+  oauthAccounts OAuthAccount[]
+  auditLog      AuditLog[]
 
   @@index([email])
   @@index([role])
   @@map("users")
+}
+
+model OAuthAccount {
+  id       String @id @default(uuid())
+  provider String
+  oauth    String
+  sub      String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([provider])
+  @@map("oauth_accounts")
 }
 
 model AuditLog {

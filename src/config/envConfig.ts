@@ -32,3 +32,11 @@ export const TOTP_ISSUER = process.env.TOTP_ISSUER || "HospitalManagement";
 export const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || "";
 export const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY || "";
 export const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || "";
+
+export const RATE_LIMIT_WINDOW_MS = parseInt(
+  process.env.RATE_LIMIT_WINDOW_MS || "900000",
+  10,
+);
+export const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || "100", 10);
+
+export const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:5173";

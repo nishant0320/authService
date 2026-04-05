@@ -1,5 +1,5 @@
 import app from "./app";
-import { PORT, NODE_ENV } from "./config/envKeys";
+import { PORT, NODE_ENV } from "./config/envConfig";
 import { disconnectRedis } from "./config/redisConfig";
 import logger from "./config/loggerConfig";
 

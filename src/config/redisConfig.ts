@@ -1,5 +1,5 @@
 import Redis from "ioredis";
-import { REDIS_URL } from "./envKeys";
+import { REDIS_URL } from "./envConfig";
 import logger from "./loggerConfig";
 
 const redis = new Redis(REDIS_URL, {

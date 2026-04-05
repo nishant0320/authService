@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import { AppError } from "../utils/errors/error";
 import logger from "../config/loggerConfig";
-import { NODE_ENV } from "../config/envKeys";
+import { NODE_ENV } from "../config/envConfig";
 import { sendError } from "../utils/common/response";
 
 export default function errorHandler(

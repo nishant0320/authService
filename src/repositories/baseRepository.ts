@@ -1,5 +1,7 @@
 import prisma from "../config/databaseConfig";
 import { Prisma } from "../generated/prisma/client";
+import { PaginatedResult, PaginationParams } from "../types";
+import { paginatedResponse } from "../utils/common/pagination";
 import {
   AppError,
   ConflictError,
@@ -109,6 +111,28 @@ export default class BaseRepository<T = any> {
       return true;
     } catch (error) {
       handlePrismaError(error, this.modelName, "deleting");
+    }
+  }
+
+  async findWithPagination(
+    params: PaginationParams,
+    where: any = {},
+    options: any = {},
+  ): Promise<PaginatedResult<T>> {
+    try {
+      const [data, total] = await Promise.all([
+        this.model.findMany({
+          where,
+          skip: (params.page - 1) * params.limit,
+          take: params.limit,
+          orderBy: { [params.sortBy || "createdAt"]: params.sortOrder },
+          ...options,
+        }),
+        this.model.count({ where }),
+      ]);
+      return paginatedResponse(data, total, params);
+    } catch (error) {
+      handlePrismaError(error, this.modelName, "paginated fetch");
     }
   }
 }
